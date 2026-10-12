@@ -1,3 +1,4 @@
+import { createRemoteJWKSet } from 'jose';
 import { loadApiConfig } from './config.js';
 import { logger } from './logger.js';
 import { createPool } from './db/pool.js';
@@ -7,6 +8,7 @@ import { createJsonCache } from './cache/jsonCache.js';
 import { createLinkRepository, type LinkStats } from './links/repository.js';
 import { rateLimit } from './http/rateLimit.js';
 import { createApp } from './http/app.js';
+import { createTokenVerifier } from './auth/jwt.js';
 import { createKafka } from './events/kafka.js';
 import { createClickPublisher } from './events/clickPublisher.js';
 import { onShutdown } from './shutdown.js';
@@ -17,6 +19,13 @@ const redis = createRedis(config.REDIS_URL);
 const producer = createKafka(config, 'shortener-api').producer({ kafkaJS: { idempotent: true } });
 await producer.connect();
 
+// Baixa o JWKS na primeira verificação e guarda em memória; busca de novo se aparecer um kid desconhecido.
+const verifyToken = createTokenVerifier({
+  issuer: config.OIDC_ISSUER,
+  audience: config.OIDC_AUDIENCE,
+  jwks: createRemoteJWKSet(new URL(config.OIDC_JWKS_URL)),
+});
+
 const app = createApp({
   links: createLinkRepository(pool),
   linkCache: createLinkCache(redis, config.CACHE_TTL_SECONDS),
@@ -24,6 +33,8 @@ const app = createApp({
   publisher: createClickPublisher(producer),
   rateLimiter: rateLimit(redis, { limit: config.RATE_LIMIT_PER_MINUTE, windowSeconds: 60 }),
   apiKey: config.API_KEY,
+  verifyToken,
+  corsOrigins: config.CORS_ALLOWED_ORIGINS,
   publicBaseUrl: config.PUBLIC_BASE_URL,
   version: config.APP_VERSION,
   isReady: async () => {

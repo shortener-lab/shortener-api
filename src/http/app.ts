@@ -1,5 +1,7 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from 'express';
+import cors from 'cors';
 import { pinoHttp } from 'pino-http';
+import { z } from 'zod';
 import { logger } from '../logger.js';
 import type { LinkCache } from '../cache/linkCache.js';
 import type { JsonCache } from '../cache/jsonCache.js';
@@ -8,8 +10,9 @@ import { buildClickEvent } from '../events/clickEvent.js';
 import { isValidCode } from '../links/code.js';
 import { normalizeTargetUrl } from '../links/url.js';
 import { createShortLink } from '../links/service.js';
-import type { LinkRepository, LinkStats } from '../links/repository.js';
-import { requireApiKey } from './apiKey.js';
+import { InvalidCursorError, type LinkRepository, type LinkStats } from '../links/repository.js';
+import type { VerifyToken } from '../auth/jwt.js';
+import { authenticate, principalOf, requireUser } from './auth.js';
 
 export interface AppDeps {
   links: LinkRepository;
@@ -18,18 +21,39 @@ export interface AppDeps {
   publisher: ClickPublisher;
   rateLimiter: RequestHandler;
   apiKey: string;
+  verifyToken: VerifyToken;
+  corsOrigins: string[];
   publicBaseUrl: string;
   version: string;
   isReady: () => Promise<boolean>;
 }
+
+const listQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().min(1).max(512).optional(),
+});
 
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // exatamente 1 proxy na frente (o ALB): req.ip = IP real do cliente
   app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' } }));
+
+  // CORS só nos prefixos da API REST. O redirect (GET /:code) é navegação, não fetch: não precisa de CORS.
+  app.use(
+    ['/links', '/me'],
+    cors({
+      origin: deps.corsOrigins,
+      methods: ['GET', 'POST'],
+      allowedHeaders: ['Authorization', 'Content-Type'],
+      exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'Retry-After'],
+      maxAge: 600,
+    }),
+  );
+
   app.use(express.json({ limit: '10kb' }));
-  const auth = requireApiKey(deps.apiKey);
+  const auth = authenticate({ apiKey: deps.apiKey, verifyToken: deps.verifyToken });
+  const shortUrl = (code: string) => `${deps.publicBaseUrl}/${code}`;
 
   // Rotas fixas ANTES de "/:code": "healthz" também tem formato de código válido.
   app.get('/healthz', (_req, res) => {
@@ -47,9 +71,34 @@ export function createApp(deps: AppDeps): express.Express {
       res.status(400).json({ error: 'invalid_url' });
       return;
     }
-    const { code, createdAt } = await createShortLink(deps.links, url, null);
+    const principal = principalOf(res);
+    const ownerId = principal.kind === 'user' ? principal.sub : null;
+    const { code, createdAt } = await createShortLink(deps.links, url, ownerId);
     await deps.linkCache.setUrl(code, url); // aquece o cache e sobrescreve um eventual "não existe"
-    res.status(201).json({ code, shortUrl: `${deps.publicBaseUrl}/${code}`, url, createdAt });
+    res.status(201).json({ code, shortUrl: shortUrl(code), url, createdAt });
+  });
+
+  app.get('/me/links', auth, requireUser, async (req, res) => {
+    const query = listQuery.safeParse(req.query);
+    if (!query.success) {
+      res.status(400).json({ error: 'invalid_query' });
+      return;
+    }
+    const principal = principalOf(res);
+    if (principal.kind !== 'user') return; // requireUser já garantiu; isto só estreita o tipo
+    try {
+      const page = await deps.links.listByOwner(principal.sub, query.data);
+      res.json({
+        items: page.items.map((item) => ({ ...item, shortUrl: shortUrl(item.code) })),
+        nextCursor: page.nextCursor,
+      });
+    } catch (err) {
+      if (err instanceof InvalidCursorError) {
+        res.status(400).json({ error: 'invalid_cursor' });
+        return;
+      }
+      throw err;
+    }
   });
 
   app.get('/links/:code/stats', auth, async (req, res) => {
@@ -57,6 +106,15 @@ export function createApp(deps: AppDeps): express.Express {
     if (!isValidCode(code)) {
       res.status(404).json({ error: 'not_found' });
       return;
+    }
+    const principal = principalOf(res);
+    if (principal.kind === 'user') {
+      // Não-dono recebe o mesmo 404 de "não existe": não confirmamos que o código é de outra pessoa.
+      const owner = await deps.links.getOwner(code);
+      if (owner !== principal.sub) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
     }
     const cached = await deps.statsCache.get(code);
     if (cached) {
