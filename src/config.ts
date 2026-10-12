@@ -5,6 +5,11 @@ const bool = z
   .default('false')
   .transform((v) => v === 'true');
 
+const csv = z
+  .string()
+  .min(1)
+  .transform((s) => s.split(',').map((v) => v.trim()).filter(Boolean));
+
 const baseSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_VERSION: z.string().default('dev'),
@@ -12,10 +17,7 @@ const baseSchema = z.object({
   DATABASE_SSL: bool,
   DATABASE_SSL_CA_FILE: z.string().optional(),
   REDIS_URL: z.string().min(1),
-  KAFKA_BROKERS: z
-    .string()
-    .min(1)
-    .transform((s) => s.split(',').map((b) => b.trim()).filter(Boolean)),
+  KAFKA_BROKERS: csv,
   KAFKA_SSL: bool,
   KAFKA_REPLICATION_FACTOR: z.coerce.number().int().min(1).default(1),
 });
@@ -26,6 +28,10 @@ const apiSchema = baseSchema.extend({
   API_KEY: z.string().min(16),
   CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
+  OIDC_ISSUER: z.url(),
+  OIDC_AUDIENCE: z.string().min(1),
+  OIDC_JWKS_URL: z.url(),
+  CORS_ALLOWED_ORIGINS: csv,
 });
 
 const workerSchema = baseSchema.extend({
