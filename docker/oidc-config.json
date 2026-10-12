@@ -1,0 +1,22 @@
+{
+  "interactiveLogin": true,
+  "httpServer": "NettyWrapper",
+  "tokenCallbacks": [
+    {
+      "issuerId": "shortener",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "grant_type",
+          "match": "client_credentials",
+          "claims": { "sub": "${clientId}", "aud": ["shortener-web"] }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "shortener-web",
+          "claims": { "sub": "${subject}", "aud": ["shortener-web"] }
+        }
+      ]
+    }
+  ]
+}

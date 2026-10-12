@@ -11,6 +11,12 @@ x-app-env: &app-env
   KAFKA_SSL: "false"
   KAFKA_REPLICATION_FACTOR: "1"
   API_KEY: dev-api-key-change-me-0123456789
+  # O token é emitido para o navegador, em localhost:8090: é esse o iss que a api confere...
+  OIDC_ISSUER: http://localhost:8090/shortener
+  OIDC_AUDIENCE: shortener-web
+  # ...mas, dentro do container, "localhost" é o próprio container: a chave pública vem pelo nome do serviço.
+  OIDC_JWKS_URL: http://oidc:8090/shortener/jwks
+  CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:8081
 
 services:
   postgres:
@@ -63,6 +69,15 @@ services:
       retries: 20
       start_period: 20s
 
+  oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.4
+    ports: ["8090:8090"]
+    environment:
+      SERVER_PORT: "8090"
+      JSON_CONFIG_PATH: /config/oidc-config.json
+    volumes:
+      - ./docker/oidc-config.json:/config/oidc-config.json:ro
+
   kafka-ui:
     profiles: [tools]
     image: ghcr.io/kafbat/kafka-ui:latest   # fixe a versão atual depois do primeiro uso
@@ -89,6 +104,7 @@ services:
     depends_on:
       setup: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
+      oidc: { condition: service_started }
 
   worker:
     profiles: [app]
