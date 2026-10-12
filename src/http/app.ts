@@ -47,9 +47,9 @@ export function createApp(deps: AppDeps): express.Express {
       res.status(400).json({ error: 'invalid_url' });
       return;
     }
-    const code = await createShortLink(deps.links, url);
+    const { code, createdAt } = await createShortLink(deps.links, url, null);
     await deps.linkCache.setUrl(code, url); // aquece o cache e sobrescreve um eventual "não existe"
-    res.status(201).json({ code, shortUrl: `${deps.publicBaseUrl}/${code}`, url });
+    res.status(201).json({ code, shortUrl: `${deps.publicBaseUrl}/${code}`, url, createdAt });
   });
 
   app.get('/links/:code/stats', auth, async (req, res) => {
