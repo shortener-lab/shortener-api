@@ -324,6 +324,40 @@ describe('GET /links/:code/stats', () => {
     expect(res.body).toEqual({ error: 'not_found' });
   });
 
+  it('miss: carimba computedAt agora e manda atualizar em 60 s', async () => {
+    const { app } = buildApp();
+    const code = await createLink(app);
+    const before = Date.now();
+    const res = await request(app).get(`/links/${code}/stats`).set('x-api-key', API_KEY);
+    expect(res.status).toBe(200);
+    expect(Date.parse(res.body.computedAt)).toBeGreaterThanOrEqual(before - 1000);
+    expect(Date.parse(res.body.computedAt)).toBeLessThanOrEqual(Date.now());
+    expect(res.body.refreshInSeconds).toBe(60);
+  });
+
+  it('hit: mantém o computedAt original e devolve quanto falta', async () => {
+    const { app } = buildApp();
+    const code = await createLink(app);
+    const computedAt = new Date(Date.now() - 45_000).toISOString(); // alguém montou o cache há 45 s
+    const cached = { code, url: 'https://example.com/', totalClicks: 7, daily: [], browsers: [], computedAt };
+    await redis.set(`stats:${code}`, JSON.stringify(cached), 'EX', 60);
+    const res = await request(app).get(`/links/${code}/stats`).set('x-api-key', API_KEY);
+    expect(res.body).toMatchObject({ totalClicks: 7, computedAt });
+    expect(res.body.refreshInSeconds).toBeGreaterThanOrEqual(14);
+    expect(res.body.refreshInSeconds).toBeLessThanOrEqual(15);
+  });
+
+  it('entrada antiga do cache, sem computedAt, é recalculada', async () => {
+    const { app } = buildApp();
+    const code = await createLink(app);
+    const legacy = { code, url: 'https://example.com/', totalClicks: 999, daily: [], browsers: [] };
+    await redis.set(`stats:${code}`, JSON.stringify(legacy), 'EX', 60);
+    const res = await request(app).get(`/links/${code}/stats`).set('x-api-key', API_KEY);
+    expect(res.body.totalClicks).toBe(0); // veio do banco, não do cache antigo
+    expect(res.body.refreshInSeconds).toBe(60);
+    expect(JSON.parse((await redis.get(`stats:${code}`)) ?? '{}').computedAt).toBe(res.body.computedAt);
+  });
+
   it('usuário também recebe 404 para link de serviço (sem dono)', async () => {
     const { app } = buildApp();
     const code = await createLink(app);

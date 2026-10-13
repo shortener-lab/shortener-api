@@ -14,10 +14,22 @@ import { InvalidCursorError, type LinkRepository, type LinkStats } from '../link
 import type { VerifyToken } from '../auth/jwt.js';
 import { authenticate, principalOf, requireUser } from './auth.js';
 
+// O que fica no cache: as stats mais o instante em que foram calculadas (relógio da api).
+export type CachedStats = LinkStats & { computedAt: string };
+
+// O que a rota devolve: o cliente mostra "atualizado às ..." e sabe quando buscar de novo.
+export type StatsResponse = CachedStats & { refreshInSeconds: number };
+
+export function withFreshness(cached: CachedStats, ttlSeconds: number, now = Date.now()): StatsResponse {
+  const expiresAt = Date.parse(cached.computedAt) + ttlSeconds * 1000;
+  const refreshInSeconds = Math.min(ttlSeconds, Math.max(0, Math.ceil((expiresAt - now) / 1000)));
+  return { ...cached, refreshInSeconds };
+}
+
 export interface AppDeps {
   links: LinkRepository;
   linkCache: LinkCache;
-  statsCache: JsonCache<LinkStats>;
+  statsCache: JsonCache<CachedStats>;
   publisher: ClickPublisher;
   rateLimiter: RequestHandler;
   apiKey: string;
@@ -116,9 +128,11 @@ export function createApp(deps: AppDeps): express.Express {
         return;
       }
     }
+    const ttl = deps.statsCache.ttlSeconds;
     const cached = await deps.statsCache.get(code);
-    if (cached) {
-      res.json(cached);
+    // Entrada sem computedAt foi gravada por uma versão anterior da api (ex.: durante o canary): recalcula.
+    if (cached && typeof cached.computedAt === 'string') {
+      res.json(withFreshness(cached, ttl));
       return;
     }
     const stats = await deps.links.getStats(code);
@@ -126,8 +140,9 @@ export function createApp(deps: AppDeps): express.Express {
       res.status(404).json({ error: 'not_found' });
       return;
     }
-    await deps.statsCache.set(code, stats);
-    res.json(stats);
+    const fresh: CachedStats = { ...stats, computedAt: new Date().toISOString() };
+    await deps.statsCache.set(code, fresh);
+    res.json(withFreshness(fresh, ttl));
   });
 
   app.get('/:code', async (req, res) => {

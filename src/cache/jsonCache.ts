@@ -2,6 +2,7 @@ import type { Redis } from 'ioredis';
 import { logger } from '../logger.js';
 
 export interface JsonCache<T> {
+  readonly ttlSeconds: number;
   get(id: string): Promise<T | null>;
   set(id: string, value: T): Promise<void>;
 }
@@ -9,6 +10,7 @@ export interface JsonCache<T> {
 export function createJsonCache<T>(redis: Redis, prefix: string, ttlSeconds: number): JsonCache<T> {
   const key = (id: string) => `${prefix}:${id}`;
   return {
+    ttlSeconds,
     async get(id) {
       try {
         const raw = await redis.get(key(id));

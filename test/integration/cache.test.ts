@@ -45,6 +45,7 @@ describe('linkCache', () => {
 describe('jsonCache', () => {
   it('serializa, expira e tolera Redis fora', async () => {
     const cache = createJsonCache<{ n: number }>(redis, 'stats', 60);
+    expect(cache.ttlSeconds).toBe(60); // a api usa para dizer ao cliente quando o valor expira
     expect(await cache.get('x')).toBeNull();
     await cache.set('x', { n: 1 });
     expect(await cache.get('x')).toEqual({ n: 1 });

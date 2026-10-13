@@ -5,9 +5,9 @@ import { createPool } from './db/pool.js';
 import { createRedis } from './cache/redis.js';
 import { createLinkCache } from './cache/linkCache.js';
 import { createJsonCache } from './cache/jsonCache.js';
-import { createLinkRepository, type LinkStats } from './links/repository.js';
+import { createLinkRepository } from './links/repository.js';
 import { rateLimit } from './http/rateLimit.js';
-import { createApp } from './http/app.js';
+import { createApp, type CachedStats } from './http/app.js';
 import { createTokenVerifier } from './auth/jwt.js';
 import { createKafka } from './events/kafka.js';
 import { createClickPublisher } from './events/clickPublisher.js';
@@ -29,7 +29,7 @@ const verifyToken = createTokenVerifier({
 const app = createApp({
   links: createLinkRepository(pool),
   linkCache: createLinkCache(redis, config.CACHE_TTL_SECONDS),
-  statsCache: createJsonCache<LinkStats>(redis, 'stats', 60),
+  statsCache: createJsonCache<CachedStats>(redis, 'stats', 60),
   publisher: createClickPublisher(producer),
   rateLimiter: rateLimit(redis, { limit: config.RATE_LIMIT_PER_MINUTE, windowSeconds: 60 }),
   apiKey: config.API_KEY,
