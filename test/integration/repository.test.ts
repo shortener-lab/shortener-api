@@ -89,8 +89,11 @@ describe('linkRepository', () => {
 
   it('listByOwner: cursor inválido lança InvalidCursorError', async () => {
     const repo = createLinkRepository(pool);
-    const bad = Buffer.from(JSON.stringify({ t: 'ontem', c: 'abcDEF1' })).toString('base64url');
-    for (const cursor of ['nao-e-base64-json', bad]) {
+    const cursorOf = (t: string) => Buffer.from(JSON.stringify({ t, c: 'abcDEF1' })).toString('base64url');
+    // "1" e o ano 275760 passam no Date.parse do JS, mas o Postgres recusa como timestamptz.
+    // 30 de fevereiro tem o formato certo, mas não existe.
+    const bads = ['ontem', '1', '+275760-09-13T00:00:00.000Z', '2026-02-30T10:00:00.000000Z'].map(cursorOf);
+    for (const cursor of ['nao-e-base64-json', ...bads]) {
       await expect(repo.listByOwner('alice', { limit: 20, cursor })).rejects.toBeInstanceOf(InvalidCursorError);
     }
   });

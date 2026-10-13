@@ -53,12 +53,24 @@ export function encodeCursor(data: CursorData): string {
   return Buffer.from(JSON.stringify(data)).toString('base64url');
 }
 
+// Exatamente o formato que o to_char da query emite (microssegundos, UTC).
+const CURSOR_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+// O Date.parse aceita "1" e anos que o Postgres recusa, e o Postgres recusaria com 500.
+// Ida e volta pelo Date (em milissegundos) também pega datas que não existem, como 30 de fevereiro.
+function isCursorTime(t: string): boolean {
+  if (!CURSOR_TIME.test(t)) return false;
+  const ms = `${t.slice(0, 23)}Z`;
+  const d = new Date(ms);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === ms;
+}
+
 export function decodeCursor(cursor: string): CursorData {
   try {
     const data: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
     if (typeof data === 'object' && data !== null && 't' in data && 'c' in data) {
       const { t, c } = data;
-      if (typeof t === 'string' && typeof c === 'string' && !Number.isNaN(Date.parse(t)) && isValidCode(c)) {
+      if (typeof t === 'string' && typeof c === 'string' && isCursorTime(t) && isValidCode(c)) {
         return { t, c };
       }
     }
