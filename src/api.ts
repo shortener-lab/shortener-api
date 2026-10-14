@@ -9,15 +9,16 @@ import { createLinkRepository } from './links/repository.js';
 import { rateLimit } from './http/rateLimit.js';
 import { createApp, type CachedStats } from './http/app.js';
 import { createTokenVerifier } from './auth/jwt.js';
-import { createKafka } from './events/kafka.js';
+import { connectInBackground, createKafka } from './events/kafka.js';
 import { createClickPublisher } from './events/clickPublisher.js';
 import { onShutdown } from './shutdown.js';
 
 const config = loadApiConfig();
 const pool = createPool(config);
 const redis = createRedis(config.REDIS_URL);
-const producer = createKafka(config, 'shortener-api').producer({ kafkaJS: { idempotent: true } });
-await producer.connect();
+const kafka = createKafka(config, 'shortener-api');
+// Sem await: a api abre a porta mesmo com o Kafka fora (o redirect não depende das estatísticas).
+const producer = connectInBackground(() => kafka.producer({ kafkaJS: { idempotent: true } }));
 
 // Baixa o JWKS na primeira verificação e guarda em memória; busca de novo se aparecer um kid desconhecido.
 const verifyToken = createTokenVerifier({
@@ -30,7 +31,7 @@ const app = createApp({
   links: createLinkRepository(pool),
   linkCache: createLinkCache(redis, config.CACHE_TTL_SECONDS),
   statsCache: createJsonCache<CachedStats>(redis, 'stats', 60),
-  publisher: createClickPublisher(producer),
+  publisher: createClickPublisher(producer.sender),
   rateLimiter: rateLimit(redis, { limit: config.RATE_LIMIT_PER_MINUTE, windowSeconds: 60 }),
   apiKey: config.API_KEY,
   verifyToken,
@@ -55,7 +56,7 @@ server.headersTimeout = 66_000;
 
 onShutdown([
   () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
-  () => producer.disconnect(),
+  () => producer.close(),
   () => redis.quit(),
   () => pool.end(),
 ]);
