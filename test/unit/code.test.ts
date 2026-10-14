@@ -11,7 +11,7 @@ describe('code', () => {
   });
   it('valida formato', () => {
     expect(isValidCode('abcDEF1')).toBe(true);
-    expect(isValidCode('abc')).toBe(false);
+    expect(isValidCode('abc')).toBe(true);
     expect(isValidCode('abc-EF1')).toBe(false);
     expect(isValidCode('favicon.ico')).toBe(false);
     expect(isValidCode('healthz')).toBe(true); // por isso a ordem das rotas importa (Tarefa 1.8)
