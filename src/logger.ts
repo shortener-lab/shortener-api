@@ -1,6 +1,6 @@
-import pino from 'pino';
-
+import pino from "pino";
+// adicionar
 export const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-  base: { version: process.env.APP_VERSION ?? 'dev' },
+  level: process.env.LOG_LEVEL ?? "info",
+  base: { version: process.env.APP_VERSION ?? "dev" },
 });
