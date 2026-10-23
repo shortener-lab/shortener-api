@@ -92,6 +92,10 @@ describe('health', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: 'ok', version: 'test' });
   });
+  it('expõe a versão no header X-Shortener-Version', async () => {
+    const res = await request(buildApp().app).get('/healthz');
+    expect(res.headers['x-shortener-version']).toBe('test');
+  });
   it('/readyz devolve 503 quando o banco não responde', async () => {
     const res = await request(buildApp({ isReady: async () => false }).app).get('/readyz');
     expect(res.status).toBe(503);
