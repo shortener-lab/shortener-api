@@ -52,6 +52,10 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: shortener-api:ci
           platforms: linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: A imagem lê o CA do RDS como usuário node
+        run: docker run --rm shortener-api:ci node -e "require('fs').readFileSync(process.argv[1])" /app/certs/rds-global-bundle.pem
