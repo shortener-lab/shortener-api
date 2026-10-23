@@ -47,3 +47,64 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: image
+    runs-on: ubuntu-24.04
+    permissions: {}
+    concurrency:
+      group: deploy-staging-api
+      cancel-in-progress: false
+    steps:
+      - name: Gera token do GitHub App (só shortener-deploy, ~1h)
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEPLOYER_CLIENT_ID }}
+          private-key: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: shortener-deploy
+
+      - name: Identidade do bot
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          BOT_ID=$(gh api "/users/${SLUG}[bot]" --jq .id)
+          echo "name=${SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${BOT_ID}+${SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout do shortener-deploy
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/shortener-deploy
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Atualiza a tag no overlay de staging
+        env:
+          TAG: ${{ needs.image.outputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^sha-[0-9a-f]{7}$ ]] || { echo "tag inválida: $TAG"; exit 1; }
+          yq -i '(.images[] | select(.name == "shortener-api")).newTag = strenv(TAG)' \
+            apps/api/overlays/staging/kustomization.yaml
+          git diff --stat
+
+      - name: Commit e push (com retry)
+        env:
+          TAG: ${{ needs.image.outputs.tag }}
+          BOT_NAME: ${{ steps.bot.outputs.name }}
+          BOT_EMAIL: ${{ steps.bot.outputs.email }}
+        run: |
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+          if git diff --quiet; then echo "staging já está em api $TAG"; exit 0; fi
+          git commit -am "deploy(staging): api $TAG"
+          for attempt in 1 2 3 4 5; do
+            git push origin HEAD:main && exit 0
+            echo "push recusado (tentativa $attempt): outro deploy chegou antes; rebase e tento de novo"
+            sleep $((attempt * 3))
+            git pull --rebase origin main
+          done
+          exit 1
