@@ -150,6 +150,12 @@ export function createApp(deps: AppDeps): express.Express {
   });
 
   app.get('/:code', async (req, res) => {
+    // BUG PROPOSITAL (Tarefa 8.7 do plano): só ativa dentro de um pod (o kubelet injeta
+    // KUBERNETES_SERVICE_HOST), por isso os testes e o CI não o pegam. Será revertido.
+    if (process.env.KUBERNETES_SERVICE_HOST && Math.random() < 0.3) {
+      res.status(500).json({ error: 'internal' });
+      return;
+    }
     const { code } = req.params as { code: string }; // @types/express 5 tipa params como string | string[]
     if (!isValidCode(code)) {
       res.status(404).json({ error: 'not_found' });
