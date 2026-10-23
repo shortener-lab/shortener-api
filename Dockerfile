@@ -15,7 +15,10 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
-# CA da AWS para validar o TLS do RDS (usada via DATABASE_SSL_CA_FILE)
+# CA da AWS para validar o TLS do RDS (usada via DATABASE_SSL_CA_FILE).
+# A pasta nasce antes, com 755: se o ADD a criasse, o --chmod=644 valeria para ela também,
+# e sem o bit x o usuário node não entra nela (EACCES no setup).
+RUN mkdir -p /app/certs
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
