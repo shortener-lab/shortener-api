@@ -48,6 +48,10 @@ const listQuery = z.object({
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.set('X-Shortener-Version', deps.version);
+    next();
+  });
   app.set('trust proxy', 1); // exatamente 1 proxy na frente (o ALB): req.ip = IP real do cliente
   app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' } }));
 
